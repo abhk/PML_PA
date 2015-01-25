@@ -1,0 +1,129 @@
+---
+title: "Practical Machine Learning Peer Assessment"
+author: "Abhijit"
+date: "Monday, January 26, 2015"
+output: html_document
+---
+
+**LOADING THE DATA**
+
+We first load the data in the training set and test files into dataframes. We will be using the caret package for this project. Observe that within the training set several observations are either empty or recorded as "#DIV/0!" or "NA". We will impute NA wherever such observations occur in the data.
+
+```{r}
+library(caret)
+#Read file and substitute NAs
+setwd("C:/Users/Mooni/Documents/Coursera/PML")
+df<-read.csv("pml-training.csv",na.strings=c("NA","#DIV/0!",""))
+df2<-read.csv("pml-testing.csv",na.strings=c("NA","#DIV/0!",""))
+
+```
+
+**Processing the data**
+
+We further process the data with the following objectives:
+
+- Retain only those variables in which data has been recorded for all observations
+- Remove the first 7 columns which are essentially labels
+- Further split the training dataset into two partitions for cross validation purposes
+
+```{r}
+#Count NAs and select only those variables for which data is available for all 19622 observations
+#Remove first 7 columns
+y<-colSums(!is.na(df))
+traindata<-df[names(y[y==19622])][-c(1:7)]
+testdata<-df2[c(names(traindata[-53]))]
+
+#Split data into training and test sets
+inTrain <- createDataPartition (y=traindata$classe, p=0.7,list=FALSE)
+training<-traindata[inTrain,]
+testing<-traindata[-inTrain,]
+```
+
+** Predictor reduction**
+
+We now look for correlation between the predictors by constructing the correlation matrix for predictors having 80% or more correlation with other predictors.  
+
+```{r}
+#Construct and output correlation matrix
+M<- abs(cor(training[,-53]))
+diag(M)<-0
+which(M>0.8,arr.ind=T)
+```
+
+Since, there are multiple correlated predictors, we apply Principle compnent analysis to reduce the number of predictors.
+```{r}
+#Carry out PCA
+preProc<-preProcess(training[,-53],method="pca", thresh=0.99)
+trainPC<-predict(preProc,training[,-53])
+testPC<- predict(preProc, testing[, -53])
+```
+
+**Fitting the data and Model Selection**
+
+The next step is to obtain a fit for the training set using an appropriate model.
+
+We will evaluate two models by comparing their accuracy and then use the better model for final predictions.
+
+The models we will be using are:
+- Random Forests
+- Gradient Boosting Machine
+
+We begin by fitting each model to the training set.
+```{r}
+#Fit model
+modelFit1 <- train(training$classe ~ ., method = "rf", data = trainPC, trControl = trainControl(method = "cv", number = 4), importance = TRUE)
+modelFit2 <- train(training$classe ~ ., method = "gbm", data = trainPC, trControl = trainControl(method = "repeatedcv",number = 2,repeats = 1), verbose=FALSE)
+```
+
+Next, we predict on the test partition...
+```{r}
+#Predict on the test partiion:
+testpredict1<- predict(modelFit1, testPC)
+testpredict2<- predict(modelFit2, testPC)
+```
+
+...and compare the predicted values with the actual values in the test set.
+
+We will use two tools for determining the accuracy of the models:
+- Confusion Matrix
+- postResample
+
+```{r}
+CM1 <- confusionMatrix(testing$classe,testpredict1)
+CM2 <- confusionMatrix(testing$classe,testpredict2)
+
+CM1$table
+CM2$table
+
+score1 <- postResample(testing$classe,testpredict1)[1]
+score2 <- postResample(testing$classe,testpredict2)[1]
+
+score1
+score2
+
+```
+
+The out of bag sampling error is 1-accuracy:
+
+```{r}
+OOB1<-1-score1
+OOB2<-1-score2
+
+OOB1
+OOB2
+```
+
+From the above scores it is evident that Random Forest has higher accuracy of about 98% and OOB error rate of about 2%. The lower accuracy of GBM could be due to the fact that only two-fold cross validation has been used due to limitations in computing power. A more accurate comparison can be obtained ona faster machine.
+
+In the present case, we select the Random Forest model for making the final predictions.
+
+**Conclusions and Predictions**
+
+We predict on the test data from the "pml-testing.csv" file. The code and resulting predictions are given below:
+
+```{r}
+#Predict
+predictPC<-predict(preProc, testdata)
+prediction<-predict(modelFit1,predictPC)
+prediction
+```
